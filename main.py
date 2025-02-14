@@ -13,9 +13,9 @@ import torch.optim as optim
 import math
 import re
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Pomocnicza funkcja konwertująca string na bool
-# =============================================================================
+# ---------------------------------------------------------------------------
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -26,12 +26,13 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Argumenty wiersza poleceń
-# =============================================================================
+# ---------------------------------------------------------------------------
 # --model: "new" (domyślnie), "latest" lub ścieżka do modelu.
 # --model_name: opcjonalna nazwa dla nowego modelu (bez numeru epizodu).
-# Dodatkowo: --mmax_steps, --grid_width, --grid_height, --cell_size, --always_visualize, --lookahead_depth, --visualize_rate.
+# Dodatkowo: --mmax_steps, --grid_width, --grid_height, --cell_size, --always_visualize,
+#           --lookahead_depth, --visualize_rate.
 parser = argparse.ArgumentParser(description="Train Snake RL Agent")
 parser.add_argument("--model", type=str, default="new",
                     help="Tryb ładowania modelu: 'new' (domyślnie), 'latest' lub ścieżka do modelu")
@@ -51,69 +52,68 @@ parser.add_argument("--lookahead_depth", type=int, default=5,
                     help="Głębokość symulacji lookahead")
 parser.add_argument("--visualize_rate", type=str, default="20",
                     help="Wartość określająca częstotliwość wizualizacji. Jeśli '0' - każdy epizod; "
-                         "jeśli zaczyna się od 0 (np. '020') - dokładna wartość; w przeciwnym razie, "
-                         "dla ep <20: co 5, dla ep <100: co wartość, dla ep <300: co 50, <1000: co 100, else: co 200.")
+                         "jeśli zaczyna się od '0' (np. '020') - dokładna wartość; w przeciwnym razie: "
+                         "wizualizuj co podany % aktualnego epizodu.")
 args = parser.parse_args()
 model_mode = args.model
 custom_model_name = args.model_name
 visualize_rate_param = args.visualize_rate
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Ustawienia – zastępujemy stałe wartości argumentami
-# =============================================================================
-CELL_SIZE = args.cell_size
-GRID_WIDTH = args.grid_width
-GRID_HEIGHT = args.grid_height
-WINDOW_WIDTH = GRID_WIDTH * CELL_SIZE
-WINDOW_HEIGHT = GRID_HEIGHT * CELL_SIZE
+# ---------------------------------------------------------------------------
+CELL_SIZE = args.cell_size            
+GRID_WIDTH = args.grid_width           
+GRID_HEIGHT = args.grid_height         
+WINDOW_WIDTH = GRID_WIDTH * CELL_SIZE   
+WINDOW_HEIGHT = GRID_HEIGHT * CELL_SIZE 
 FPS = 30
 
-MAX_EPISODES = 5000
-mMAX_STEPS = args.mmax_steps
+MAX_EPISODES = 5000                   
+mMAX_STEPS = args.mmax_steps            
 
-EPSILON_START = 1.0
-EPSILON_MIN = 0.01
-EPSILON_DECAY = 0.98
-LR = 0.001
-GAMMA = 0.9
+EPSILON_START = 1.0                   
+EPSILON_MIN = 0.01                    
+EPSILON_DECAY = 0.98                  
+LR = 0.001                            
+GAMMA = 0.9                         
 BATCH_SIZE = 64
 
-SHAPING_FACTOR = 0.8
+SHAPING_FACTOR = 0.8                  
 
-SURVIVAL_THRESHOLD = 0.2
-SURVIVAL_FACTOR = 10
+SURVIVAL_THRESHOLD = 0.2              
+SURVIVAL_FACTOR = 10                  
 
-LOOKAHEAD_DEPTH = args.lookahead_depth
-LOOKAHEAD_WEIGHT = 5
+LOOKAHEAD_DEPTH = args.lookahead_depth  
+LOOKAHEAD_WEIGHT = 5                  
 
-ALWAYS_VISUALIZE = args.always_visualize
+ALWAYS_VISUALIZE = args.always_visualize  
 
 # Folder do zapisywania modeli
 MODELS_FOLDER = "models"
 os.makedirs(MODELS_FOLDER, exist_ok=True)
 
-SAVE_MODEL_EVERY = 10
-MAX_MODELS_TO_SAVE = 5
+SAVE_MODEL_EVERY = 10                 
+MAX_MODELS_TO_SAVE = 5                
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Funkcja ekstrakcji numeru epizodu z nazwy pliku
-# =============================================================================
+# ---------------------------------------------------------------------------
 def extract_episode(filename):
     match = re.search(r'_ep(\d+)', filename)
     if match:
         return int(match.group(1))
     return None
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Ustalenie identyfikatora treningu (training_run_id)
-# =============================================================================
+# ---------------------------------------------------------------------------
 if model_mode == "new":
     if custom_model_name:
         training_run_id = custom_model_name
     else:
         training_run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 else:
-    # Jeśli użytkownik podał nazwę bez ścieżki, przeszukujemy folder MODELS
     if not ("/" in model_mode or "\\" in model_mode):
         model_mode = os.path.join(MODELS_FOLDER, model_mode)
     base = os.path.basename(model_mode)
@@ -123,34 +123,31 @@ else:
     else:
         training_run_id = "default"
 
-# =============================================================================
-# Funkcja should_visualize - oparta na parametrze visualize_rate
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Funkcja should_visualize oparta o parametr visualize_rate
+# ---------------------------------------------------------------------------
 def should_visualize(episode, rate_str):
     """
     Decyduje, czy wizualizować epizod.
     Jeśli rate_str == "0", wizualizuj każdy epizod.
     Jeśli rate_str zaczyna się od '0' (np. "020"), interpretuj jako dokładną wartość (np. co 20 epizod).
-    W przeciwnym razie:
-       - wizualizuj co podany % aktualnego epizodu
+    W przeciwnym razie wizualizuj co podany % aktualnego epizodu.
     """
     if rate_str == "0":
         return True
     if rate_str[0] == "0":
         freq = int(rate_str)
     else:
-        if episode % rate_str == 0 or episode == 0:
-            freq = int(rate_str*(episode/100))
-
+        freq = max(1, int((episode * int(rate_str)) / 100))
     return (episode % freq == 0)
 
-# =============================================================================
-# Funkcja save_model - zapisuje modele w folderze MODELS
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Funkcja save_model - zapisuje modele do folderu MODELS
+# ---------------------------------------------------------------------------
 def save_model(model, episode, run_id, path_prefix="snake_model", max_models=MAX_MODELS_TO_SAVE):
     """
     Zapisuje model do pliku: {MODELS_FOLDER}/{path_prefix}_{run_id}_ep{current_episode}.pth.
-    Jeśli run_id zawiera numer epizodu, kontynuujemy numerację; w przeciwnym razie zaczynamy od 1.
+    Jeśli run_id zawiera numer epizodu, kontynuujemy numerację, w przeciwnym razie liczymy od 1.
     """
     try:
         base, ep_str = run_id.split("_ep")
@@ -171,9 +168,9 @@ def save_model(model, episode, run_id, path_prefix="snake_model", max_models=MAX
         os.remove(removed)
         print(f"Usunięto najstarszy model: {removed}")
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Funkcje pomocnicze: sterowanie, kolizje, odległość, obiekty
-# =============================================================================
+# ---------------------------------------------------------------------------
 def turn_left(direction):
     """Zwraca nowy kierunek po skręcie w lewo."""
     if direction == (0, -1): return (-1, 0)
@@ -235,9 +232,9 @@ def rotate_vector(vector, angle):
     return (vector[0]*math.cos(rad) - vector[1]*math.sin(rad),
             vector[0]*math.sin(rad) + vector[1]*math.cos(rad))
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Funkcja compute_available_space
-# =============================================================================
+# ---------------------------------------------------------------------------
 def compute_available_space(head, snake_body):
     """
     Oblicza procent dostępnych komórek osiągalnych z pozycji head.
@@ -259,9 +256,9 @@ def compute_available_space(head, snake_body):
                 queue.append(n)
     return count / total_cells
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Funkcje pomocnicze dla Lookahead
-# =============================================================================
+# ---------------------------------------------------------------------------
 def clone_snake(snake):
     """Tworzy kopię obiektu Snake."""
     new_snake = Snake(snake.body[0], snake.direction)
@@ -306,12 +303,12 @@ def rollout_value(snake, food, depth, prev_avail):
         best = max(best, cumulative)
     return best
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Funkcja get_state
-# =============================================================================
+# ---------------------------------------------------------------------------
 def get_state(snake, food):
     """
-    Buduje wektor wejściowy opisujący stan gry bez mapy i bez wektora "do tyłu".
+    Buduje wektor wejściowy opisujący stan gry bez mapy i bez informacji "do tyłu".
     Składa się z:
       1. Relatywnej pozycji jedzenia (2 wartości),
       2. Kierunku ruchu jako one-hot (4 wartości),
@@ -322,7 +319,7 @@ def get_state(snake, food):
     """
     features = []
     head = snake.body[0]
-    # 1. Pozycja jedzenia
+    # 1. Pozycja jedzenia względem głowy
     dx = (food[0] - head[0]) / GRID_WIDTH
     dy = (food[1] - head[1]) / GRID_HEIGHT
     features.extend([dx, dy])
@@ -340,7 +337,7 @@ def get_state(snake, food):
     # 3. Globalna dostępność przestrzeni
     avail = compute_available_space(head, snake.body)
     features.append(avail)
-    # 4. Pozycje pierwszych dwóch segmentów ciała
+    # 4. Pozycje pierwszych dwóch segmentów ciała (relatywnie do głowy)
     if len(snake.body) > 1:
         seg1 = snake.body[1]
         features.append((seg1[0] - head[0]) / GRID_WIDTH)
@@ -354,10 +351,12 @@ def get_state(snake, food):
     else:
         features.extend([0, 0])
     # 5. Lokalna analiza otoczenia dla 7 względnych kierunków
-    head_angle = math.degrees(math.atan2(snake.direction[1], snake.direction[0])) if snake.direction != (0,0) else 0
-    rel_angles = [0, 45, 90, 135, 225, 270, 315]
+    # Poprawiamy: obliczamy bazowy kąt z użyciem aktualnego kierunku, ale dodając 180,
+    # aby odwrócić kierunek (0° względem bazowego teraz oznacza DO PRZODU).
+    base_angle = (math.degrees(math.atan2(snake.direction[1], snake.direction[0])) + 180) % 360
+    rel_angles = [-90, -45, -22.5, 0, 22.5, 45, 90]  # 7 kierunków, bez wektora "do tyłu"
     for r in rel_angles:
-        abs_angle = head_angle + r
+        abs_angle = (base_angle + r) % 360
         d = (math.cos(math.radians(abs_angle)), math.sin(math.radians(abs_angle)))
         dist = get_distance_in_direction(head, d, snake.body)
         features.append(dist)
@@ -372,19 +371,19 @@ def get_state(snake, food):
             features.extend([0, 0, 0])
     return np.array(features, dtype=float)
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Funkcja print_prev_state_no_map
-# =============================================================================
+# ---------------------------------------------------------------------------
 def print_prev_state_no_map(vector):
     """
-    Wypisuje etykietowane wartości wejścia (bez mapy – 39 elementów) w czytelnym formacie.
+    Wypisuje czytelnie etykietowane wartości wejścia (bez mapy – 39 elementów) w czytelnym formacie.
     Podstawowe informacje (indeksy 0-10):
       0: Food dx, 1: Food dy,
       2: Dir Up, 3: Dir Down, 4: Dir Left, 5: Dir Right,
       6: Global Avail,
       7: Seg1 dx, 8: Seg1 dy,
       9: Seg2 dx, 10: Seg2 dy.
-    Następnie 7 bloków (dla względnych kątów: 0°,45°,90°,135°,225°,270°,315°), każdy po 4 elementy:
+    Następnie 7 bloków (dla względnych kątów: -90, -45, -22.5, 0, 22.5, 45, 90), każdy po 4 elementy:
          - 1: Distance,
          - 2-4: Object (None, Ciało, Jedzenie)
     """
@@ -398,7 +397,7 @@ def print_prev_state_no_map(vector):
     print("Podstawowe informacje:")
     for i, lab in enumerate(basic_labels):
         print(f"{lab:12s}: {vector[i]:6.3f}")
-    rel_angles = [0, 45, 90, 135, 225, 270, 315]
+    rel_angles = [-90, -45, -22.5, 0, 22.5, 45, 90]
     print("\nLokalna analiza otoczenia (kąty względne):")
     for i, angle in enumerate(rel_angles):
         base = 11 + i * 4
@@ -412,11 +411,11 @@ def print_prev_state_no_map(vector):
             obj = "Jedzenie"
         else:
             obj = "Unknown"
-        print(f"  Kąt {angle:3d}°: Distance = {dist:6.3f}, Object = {obj}")
+        print(f"  Kąt {angle:6.1f}°: Distance = {dist:6.3f}, Object = {obj}")
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Definicja sieci neuronowej AdvancedQNet
-# =============================================================================
+# ---------------------------------------------------------------------------
 class AdvancedQNet(nn.Module):
     def __init__(self, input_size, hidden_sizes, output_size):
         """
@@ -438,9 +437,9 @@ class AdvancedQNet(nn.Module):
         """Przekazuje wejście przez sieć i zwraca wyjście."""
         return self.model(x)
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Klasa agenta DQN
-# =============================================================================
+# ---------------------------------------------------------------------------
 class DQNAgent:
     def __init__(self, state_size, hidden_sizes, output_size, lr=LR, gamma=GAMMA,
                  epsilon_start=EPSILON_START, epsilon_min=EPSILON_MIN,
@@ -508,9 +507,9 @@ class DQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Klasa reprezentująca węża
-# =============================================================================
+# ---------------------------------------------------------------------------
 class Snake:
     def __init__(self, pos, direction):
         """Inicjalizuje węża z początkową pozycją i kierunkiem."""
@@ -520,9 +519,9 @@ class Snake:
         self.new_head = None
         self.growing = False
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Funkcje środowiskowe
-# =============================================================================
+# ---------------------------------------------------------------------------
 def generate_food(snake):
     """Generuje nową pozycję jedzenia, która nie koliduje z ciałem węża."""
     while True:
@@ -583,24 +582,24 @@ def draw_board(snake, food, episode, score):
     screen.blit(info, (10, 10))
     pygame.display.flip()
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Inicjalizacja Pygame
-# =============================================================================
+# ---------------------------------------------------------------------------
 if ALWAYS_VISUALIZE:
     pygame.init()
     screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
     pygame.display.set_caption("Snake RL – Trening pojedynczego węża")
     clock = pygame.time.Clock()
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Inicjalizacja agenta
-# =============================================================================
+# ---------------------------------------------------------------------------
 state_size = 39            # Wejście: 39 elementów (bez mapy)
 hidden_sizes = [512, 256]    # Warstwy ukryte
 output_size = 3            # 3 akcje: 0 - prosto, 1 - lewo, 2 - prawo
 agent = DQNAgent(state_size, hidden_sizes, output_size)
 
-# Jeśli model_mode nie jest "new", wczytujemy model z folderu MODELS, jeśli nie podano pełnej ścieżki.
+# Wczytywanie modelu – jeśli model_mode nie jest "new"
 if model_mode != "new":
     if not ("/" in model_mode or "\\" in model_mode):
         model_mode = os.path.join(MODELS_FOLDER, model_mode)
@@ -621,45 +620,12 @@ if model_mode != "new":
         else:
             print("Podany plik modelu nie istnieje. Trening od nowa.")
 
-# =============================================================================
-# Nowa funkcja should_visualize oparta o parametr visualize_rate
-# =============================================================================
-def should_visualize_rate(episode, rate_str):
-    """
-    Zwraca True, gdy epizod ma być wizualizowany.
-    Jeśli rate_str == "0", wizualizuj każdy epizod.
-    Jeśli rate_str zaczyna się od '0', interpretuj jako dokładną wartość (np. "020" -> co 20 epizod).
-    W przeciwnym razie:
-       - dla ep < 20: co 5 epizod,
-       - dla ep < 100: co int(rate_str) epizod,
-       - dla ep < 300: co 50,
-       - dla ep < 1000: co 100,
-       - inaczej: co 200.
-    """
-    if rate_str == "0":
-        return True
-    if rate_str[0] == "0":
-        freq = int(rate_str)
-        return (episode % freq == 0)
-    else:
-        if episode < 20:
-            freq = 5
-        elif episode < 100:
-            freq = int(rate_str)
-        elif episode < 300:
-            freq = 50
-        elif episode < 1000:
-            freq = 100
-        else:
-            freq = 200
-        return (episode % freq == 0)
-
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Główna pętla treningowa
-# =============================================================================
+# ---------------------------------------------------------------------------
 mstep_helper = 0
 for episode in range(1, MAX_EPISODES + 1):
-    # Ustalanie numeru epizodu na podstawie run_id, jeśli zawiera "_epXXX"
+    # Ustalanie numeru epizodu na podstawie run_id – jeżeli zawiera "_epXXX", kontynuujemy
     try:
         base, ep_str = training_run_id.split("_ep")
         start_episode = int(ep_str) + 1
@@ -674,7 +640,7 @@ for episode in range(1, MAX_EPISODES + 1):
     episode_score = 0.0
 
     state = get_state(snake, food)
-    # Zachowujemy stan wejściowy (bez mapy) – 39 elementów
+    # Zachowujemy stan wejściowy (bez mapy – 39 elementów)
     prev_state_no_map = state[:39]
     old_head = snake.body[0]
     avail_old = compute_available_space(old_head, snake.body)
@@ -688,7 +654,6 @@ for episode in range(1, MAX_EPISODES + 1):
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
-        # Zachowujemy stan (bez mapy) przed ruchem
         prev_state_no_map = state[:39]
         action = agent.get_action(state, snake, food)
         last_action = action
@@ -720,7 +685,6 @@ for episode in range(1, MAX_EPISODES + 1):
             draw_board(snake, food, current_episode, episode_score)
             pygame.time.delay(30)
     
-    # Po zakończeniu epizodu, jeśli kolizja wystąpiła, wypisujemy typ kolizji oraz ostatni ruch
     if done and collision_type is not None:
         collision_mapping = {"body": "ciało", "wall": "ściana"}
         move_mapping = {0: "prosto", 1: "lewo", 2: "prawo"}
