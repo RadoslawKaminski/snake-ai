@@ -14,7 +14,7 @@ import math
 import re
 
 # ---------------------------------------------------------------------------
-# Pomocnicza funkcja konwertująca string na bool
+# Konwersja string na bool
 # ---------------------------------------------------------------------------
 def str2bool(v):
     if isinstance(v, bool):
@@ -29,10 +29,6 @@ def str2bool(v):
 # ---------------------------------------------------------------------------
 # Argumenty wiersza poleceń
 # ---------------------------------------------------------------------------
-# --model: "new" (domyślnie), "latest" lub ścieżka do modelu.
-# --model_name: opcjonalna nazwa dla nowego modelu (bez numeru epizodu).
-# Dodatkowo: --mmax_steps, --grid_width, --grid_height, --cell_size, --always_visualize,
-#           --lookahead_depth, --visualize_rate.
 parser = argparse.ArgumentParser(description="Train Snake RL Agent")
 parser.add_argument("--model", type=str, default="new",
                     help="Tryb ładowania modelu: 'new' (domyślnie), 'latest' lub ścieżka do modelu")
@@ -51,16 +47,14 @@ parser.add_argument("--always_visualize", type=str2bool, default=True,
 parser.add_argument("--lookahead_depth", type=int, default=5,
                     help="Głębokość symulacji lookahead")
 parser.add_argument("--visualize_rate", type=str, default="20",
-                    help="Wartość określająca częstotliwość wizualizacji. Jeśli '0' - każdy epizod; "
-                         "jeśli zaczyna się od '0' (np. '020') - dokładna wartość; w przeciwnym razie: "
-                         "wizualizuj co podany % aktualnego epizodu.")
+                    help="Częstotliwość wizualizacji. Jeśli '0' - każdy epizod; jeśli zaczyna się od '0' (np. '010') - co 10 epizod; inaczej interpretuj jako procent aktualnego epizodu.")
 args = parser.parse_args()
 model_mode = args.model
 custom_model_name = args.model_name
 visualize_rate_param = args.visualize_rate
 
 # ---------------------------------------------------------------------------
-# Ustawienia – zastępujemy stałe wartości argumentami
+# Ustawienia – parametry z argumentów
 # ---------------------------------------------------------------------------
 CELL_SIZE = args.cell_size            
 GRID_WIDTH = args.grid_width           
@@ -97,7 +91,7 @@ SAVE_MODEL_EVERY = 10
 MAX_MODELS_TO_SAVE = 5                
 
 # ---------------------------------------------------------------------------
-# Funkcja ekstrakcji numeru epizodu z nazwy pliku
+# Ekstrakcja numeru epizodu z nazwy pliku
 # ---------------------------------------------------------------------------
 def extract_episode(filename):
     match = re.search(r'_ep(\d+)', filename)
@@ -124,25 +118,26 @@ else:
         training_run_id = "default"
 
 # ---------------------------------------------------------------------------
-# Funkcja should_visualize oparta o parametr visualize_rate
+# Funkcja should_visualize_rate
 # ---------------------------------------------------------------------------
-def should_visualize(episode, rate_str):
+def should_visualize_rate(episode, rate_str):
     """
     Decyduje, czy wizualizować epizod.
     Jeśli rate_str == "0", wizualizuj każdy epizod.
-    Jeśli rate_str zaczyna się od '0' (np. "020"), interpretuj jako dokładną wartość (np. co 20 epizod).
-    W przeciwnym razie wizualizuj co podany % aktualnego epizodu.
+    Jeśli rate_str zaczyna się od '0' (np. "010"), interpretuj jako dokładną wartość (np. co 10 epizod).
+    W przeciwnym razie interpretuj wartość jako procent aktualnego epizodu:
+      freq = max(1, int(episode * (int(rate_str) / 100.0)))
     """
     if rate_str == "0":
         return True
     if rate_str[0] == "0":
         freq = int(rate_str)
     else:
-        freq = max(1, int((episode * int(rate_str)) / 100))
+        freq = max(1, int(episode * (int(rate_str) / 100.0)))
     return (episode % freq == 0)
 
 # ---------------------------------------------------------------------------
-# Funkcja save_model - zapisuje modele do folderu MODELS
+# Funkcja save_model
 # ---------------------------------------------------------------------------
 def save_model(model, episode, run_id, path_prefix="snake_model", max_models=MAX_MODELS_TO_SAVE):
     """
@@ -207,8 +202,9 @@ def get_object_in_direction(pos, direction, snake, food):
     Identyfikuje obiekt w danym kierunku.
     Zwraca:
       0 - brak obiektu,
-      1 - przeszkoda (ściana lub ciało),
-      2 - jedzenie.
+      1 - ściana,
+      2 - ciało,
+      3 - jedzenie.
     """
     steps = 0
     current = pos
@@ -219,9 +215,9 @@ def get_object_in_direction(pos, direction, snake, food):
         if not (0 <= current[0] < GRID_WIDTH and 0 <= current[1] < GRID_HEIGHT):
             return 1
         if current in snake.body:
-            return 1
-        if current == food:
             return 2
+        if current == food:
+            return 3
         if steps > max_steps:
             return 0
     return 0
@@ -308,14 +304,21 @@ def rollout_value(snake, food, depth, prev_avail):
 # ---------------------------------------------------------------------------
 def get_state(snake, food):
     """
-    Buduje wektor wejściowy opisujący stan gry bez mapy i bez informacji "do tyłu".
+    Buduje wektor wejściowy opisujący stan gry (bez mapy, bez informacji "do tyłu").
     Składa się z:
       1. Relatywnej pozycji jedzenia (2 wartości),
       2. Kierunku ruchu jako one-hot (4 wartości),
       3. Globalnej dostępności przestrzeni (1 wartość),
       4. Relatywnych pozycji pierwszych dwóch segmentów ciała (4 wartości),
-      5. Lokalnej analizy otoczenia dla 7 względnych kierunków (7 x 4 = 28 wartości).
-    Łącznie: 2 + 4 + 1 + 4 + 28 = 39 elementów.
+      5. Lokalnej analizy otoczenia dla 7 względnych kierunków (7 x 5 = 35 wartości).
+    Łącznie: 2 + 4 + 1 + 4 + 35 = 46 elementów.
+    Dla lokalnej analizy: dla każdego z 7 kierunków obliczamy dystans oraz 4-elementowy wektor one-hot,
+    gdzie:
+      - [1,0,0,0] oznacza brak obiektu,
+      - [0,1,0,0] – ściana,
+      - [0,0,1,0] – ciało,
+      - [0,0,0,1] – jedzenie.
+    Kierunki względne ustalamy jako: 0° (do przodu), -45°, 45°, -90°, 90°, -135°, 135°.
     """
     features = []
     head = snake.body[0]
@@ -337,7 +340,7 @@ def get_state(snake, food):
     # 3. Globalna dostępność przestrzeni
     avail = compute_available_space(head, snake.body)
     features.append(avail)
-    # 4. Pozycje pierwszych dwóch segmentów ciała (relatywnie do głowy)
+    # 4. Pozycje segmentów ciała (pierwsze dwa segmenty)
     if len(snake.body) > 1:
         seg1 = snake.body[1]
         features.append((seg1[0] - head[0]) / GRID_WIDTH)
@@ -351,10 +354,8 @@ def get_state(snake, food):
     else:
         features.extend([0, 0])
     # 5. Lokalna analiza otoczenia dla 7 względnych kierunków
-    # Poprawiamy: obliczamy bazowy kąt z użyciem aktualnego kierunku, ale dodając 180,
-    # aby odwrócić kierunek (0° względem bazowego teraz oznacza DO PRZODU).
-    base_angle = (math.degrees(math.atan2(snake.direction[1], snake.direction[0])) + 180) % 360
-    rel_angles = [-90, -45, -22.5, 0, 22.5, 45, 90]  # 7 kierunków, bez wektora "do tyłu"
+    base_angle = math.degrees(math.atan2(snake.direction[1], snake.direction[0]))
+    rel_angles = [0, -45, 45, -90, 90, -135, 135]
     for r in rel_angles:
         abs_angle = (base_angle + r) % 360
         d = (math.cos(math.radians(abs_angle)), math.sin(math.radians(abs_angle)))
@@ -362,13 +363,15 @@ def get_state(snake, food):
         features.append(dist)
         obj = get_object_in_direction(head, d, snake, food)
         if obj == 0:
-            features.extend([1, 0, 0])
+            features.extend([1, 0, 0, 0])
         elif obj == 1:
-            features.extend([0, 1, 0])
+            features.extend([0, 1, 0, 0])
         elif obj == 2:
-            features.extend([0, 0, 1])
+            features.extend([0, 0, 1, 0])
+        elif obj == 3:
+            features.extend([0, 0, 0, 1])
         else:
-            features.extend([0, 0, 0])
+            features.extend([0, 0, 0, 0])
     return np.array(features, dtype=float)
 
 # ---------------------------------------------------------------------------
@@ -376,17 +379,19 @@ def get_state(snake, food):
 # ---------------------------------------------------------------------------
 def print_prev_state_no_map(vector):
     """
-    Wypisuje czytelnie etykietowane wartości wejścia (bez mapy – 39 elementów) w czytelnym formacie.
+    Wypisuje etykietowane wartości wejścia (bez mapy – 46 elementów) w czytelnym formacie.
     Podstawowe informacje (indeksy 0-10):
       0: Food dx, 1: Food dy,
       2: Dir Up, 3: Dir Down, 4: Dir Left, 5: Dir Right,
       6: Global Avail,
       7: Seg1 dx, 8: Seg1 dy,
       9: Seg2 dx, 10: Seg2 dy.
-    Następnie 7 bloków (dla względnych kątów: -90, -45, -22.5, 0, 22.5, 45, 90), każdy po 4 elementy:
-         - 1: Distance,
-         - 2-4: Object (None, Ciało, Jedzenie)
+    Następnie 7 bloków po 5 elementów (lokalna analiza):
+      Każdy blok: 1: Distance, 2-5: Obiekt (None, Ściana, Ciało, Jedzenie)
     """
+    if len(vector) < 46:
+        print("Otrzymano zbyt krótki wektor:", vector)
+        return
     basic_labels = [
         "Food dx", "Food dy",
         "Dir Up", "Dir Down", "Dir Left", "Dir Right",
@@ -397,17 +402,19 @@ def print_prev_state_no_map(vector):
     print("Podstawowe informacje:")
     for i, lab in enumerate(basic_labels):
         print(f"{lab:12s}: {vector[i]:6.3f}")
-    rel_angles = [-90, -45, -22.5, 0, 22.5, 45, 90]
+    rel_angles = [0, -45, 45, -90, 90, -135, 135]
     print("\nLokalna analiza otoczenia (kąty względne):")
     for i, angle in enumerate(rel_angles):
-        base = 11 + i * 4
+        base = 11 + i * 5
         dist = vector[base]
-        obj_vec = vector[base+1:base+4]
-        if np.array_equal(obj_vec, [1, 0, 0]):
+        obj_vec = vector[base+1:base+5]
+        if np.array_equal(obj_vec, [1, 0, 0, 0]):
             obj = "None"
-        elif np.array_equal(obj_vec, [0, 1, 0]):
+        elif np.array_equal(obj_vec, [0, 1, 0, 0]):
+            obj = "Ściana"
+        elif np.array_equal(obj_vec, [0, 0, 1, 0]):
             obj = "Ciało"
-        elif np.array_equal(obj_vec, [0, 0, 1]):
+        elif np.array_equal(obj_vec, [0, 0, 0, 1]):
             obj = "Jedzenie"
         else:
             obj = "Unknown"
@@ -541,8 +548,7 @@ def step(snake, food):
     """
     Wykonuje jeden ruch.
     Aktualizuje stan węża i jedzenia.
-    Zwraca: nowe jedzenie, nagrodę, flagę zakończenia (done),
-            oraz typ kolizji ("wall", "body" lub None).
+    Zwraca: nowe jedzenie, nagrodę, flagę zakończenia (done) oraz typ kolizji ("wall", "body" lub None).
     """
     head = snake.body[0]
     snake.new_head = (head[0] + snake.direction[0], head[1] + snake.direction[1])
@@ -594,8 +600,8 @@ if ALWAYS_VISUALIZE:
 # ---------------------------------------------------------------------------
 # Inicjalizacja agenta
 # ---------------------------------------------------------------------------
-state_size = 39            # Wejście: 39 elementów (bez mapy)
-hidden_sizes = [512, 256]    # Warstwy ukryte
+state_size = 46            # Wejście: 46 elementów
+hidden_sizes = [460, 200, 20]    # Warstwy ukryte
 output_size = 3            # 3 akcje: 0 - prosto, 1 - lewo, 2 - prawo
 agent = DQNAgent(state_size, hidden_sizes, output_size)
 
@@ -625,7 +631,7 @@ if model_mode != "new":
 # ---------------------------------------------------------------------------
 mstep_helper = 0
 for episode in range(1, MAX_EPISODES + 1):
-    # Ustalanie numeru epizodu na podstawie run_id – jeżeli zawiera "_epXXX", kontynuujemy
+    # Ustalanie numeru epizodu na podstawie training_run_id – jeśli zawiera "_epXXX", kontynuujemy
     try:
         base, ep_str = training_run_id.split("_ep")
         start_episode = int(ep_str) + 1
@@ -640,8 +646,8 @@ for episode in range(1, MAX_EPISODES + 1):
     episode_score = 0.0
 
     state = get_state(snake, food)
-    # Zachowujemy stan wejściowy (bez mapy – 39 elementów)
-    prev_state_no_map = state[:39]
+    # Zachowujemy cały wektor stanu (46 elementów)
+    prev_state_no_map = state.copy()
     old_head = snake.body[0]
     avail_old = compute_available_space(old_head, snake.body)
     
@@ -654,7 +660,7 @@ for episode in range(1, MAX_EPISODES + 1):
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
-        prev_state_no_map = state[:39]
+        prev_state_no_map = state.copy()
         action = agent.get_action(state, snake, food)
         last_action = action
         if action == 1:
