@@ -30,23 +30,23 @@ def str2bool(v):
 # Argumenty wiersza poleceń
 # ---------------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Train Snake RL Agent")
-parser.add_argument("--model", type=str, default="new",
+parser.add_argument("--m", type=str, default="new",
                     help="Tryb ładowania modelu: 'new' (domyślnie), 'latest' lub ścieżka do modelu")
-parser.add_argument("--model_name", type=str, default="",
+parser.add_argument("--name", type=str, default="",
                     help="Opcjonalna nazwa dla nowego modelu (bez numeru epizodu)")
-parser.add_argument("--mmax_steps", type=int, default=100,
+parser.add_argument("--steps", type=int, default=100,
                     help="Maksymalna liczba kroków w epizodzie")
-parser.add_argument("--grid_width", type=int, default=20,
+parser.add_argument("--w", type=int, default=20,
                     help="Liczba komórek w poziomie")
-parser.add_argument("--grid_height", type=int, default=20,
+parser.add_argument("--h", type=int, default=20,
                     help="Liczba komórek w pionie")
 parser.add_argument("--cell_size", type=int, default=20,
                     help="Rozmiar pojedynczej komórki (w pikselach)")
-parser.add_argument("--always_visualize", type=str2bool, default=True,
+parser.add_argument("--v", type=str2bool, default=True,
                     help="Czy używać wizualizacji Pygame (True/False)")
 parser.add_argument("--lookahead_depth", type=int, default=5,
                     help="Głębokość symulacji lookahead")
-parser.add_argument("--visualize_rate", type=str, default="20",
+parser.add_argument("--vis_rate", type=str, default="20",
                     help="Częstotliwość wizualizacji. Jeśli '0' - każdy epizod; jeśli zaczyna się od '0' (np. '010') - co 10 epizod; inaczej interpretuj jako procent aktualnego epizodu.")
 args = parser.parse_args()
 model_mode = args.model
@@ -375,9 +375,9 @@ def get_state(snake, food):
     return np.array(features, dtype=float)
 
 # ---------------------------------------------------------------------------
-# Funkcja print_prev_state_no_map
+# Funkcja print_prev_state
 # ---------------------------------------------------------------------------
-def print_prev_state_no_map(vector):
+def print_prev_state(vector):
     """
     Wypisuje etykietowane wartości wejścia (bez mapy – 46 elementów) w czytelnym formacie.
     Podstawowe informacje (indeksy 0-10):
@@ -638,8 +638,8 @@ for episode in range(1, MAX_EPISODES + 1):
     except Exception:
         start_episode = 1
     current_episode = start_episode + episode - 1
-
     vis = should_visualize_rate(current_episode, args.visualize_rate) if ALWAYS_VISUALIZE else False
+    print(f'vis: {(vis)}')
     snake, food = reset_game()  # Reset gry
     step_count = 0
     done = False
@@ -647,7 +647,7 @@ for episode in range(1, MAX_EPISODES + 1):
 
     state = get_state(snake, food)
     # Zachowujemy cały wektor stanu (46 elementów)
-    prev_state_no_map = state.copy()
+    prev_state = state.copy()
     old_head = snake.body[0]
     avail_old = compute_available_space(old_head, snake.body)
     
@@ -655,12 +655,12 @@ for episode in range(1, MAX_EPISODES + 1):
 
     while not done and step_count < mMAX_STEPS:
         step_count += 1
-        if ALWAYS_VISUALIZE:
+        if vis:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
-        prev_state_no_map = state.copy()
+        prev_state = state.copy()
         action = agent.get_action(state, snake, food)
         last_action = action
         if action == 1:
@@ -687,7 +687,7 @@ for episode in range(1, MAX_EPISODES + 1):
         agent.train()
         state = new_state
 
-        if ALWAYS_VISUALIZE:
+        if vis:
             draw_board(snake, food, current_episode, episode_score)
             pygame.time.delay(30)
     
@@ -696,8 +696,8 @@ for episode in range(1, MAX_EPISODES + 1):
         move_mapping = {0: "prosto", 1: "lewo", 2: "prawo"}
         print("\nEpizod zakończony kolizją z:", collision_mapping.get(collision_type, "nieznane"))
         print("Ostatni ruch wykonany:", move_mapping.get(last_action, "nieznany"))
-        print("Stan wejściowy (bez mapy) z jednego kroku wcześniej:")
-        print_prev_state_no_map(prev_state_no_map)
+        print("Stan wejściowy z jednego kroku wcześniej:")
+        print_prev_state(prev_state)
     
     if episode % 5 == 0:
         mstep_helper = 0 
@@ -712,8 +712,8 @@ for episode in range(1, MAX_EPISODES + 1):
     if episode % SAVE_MODEL_EVERY == 0:
         save_model(agent.model, current_episode, training_run_id)
         
-    if ALWAYS_VISUALIZE:
+    if vis:
         pygame.time.delay(500)
-if ALWAYS_VISUALIZE:
+if vis:
     pygame.quit()
 sys.exit()
